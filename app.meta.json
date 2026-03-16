@@ -1,0 +1,11 @@
+{
+  "name": "guestcard-dashboard",
+  "template": "react-app",
+  "description": "Live spreadsheet dashboard that displays all guest card submissions in real-time — companion to the GuestCard chatbot",
+  "createdAt": "2026-03-16T20:00:00.000Z",
+  "language": "javascript",
+  "category": "web",
+  "status": "new",
+  "features": [],
+  "port": 5176
+}
