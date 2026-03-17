@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 
 function getSubmissions() {
   try {
@@ -8,6 +8,40 @@ function getSubmissions() {
     localStorage.removeItem('guestcard_submissions');
     return [];
   }
+}
+
+function formatRelativeTime(isoString) {
+  if (!isoString) return '';
+  const date = new Date(isoString);
+  const now = new Date();
+  const diffMs = now - date;
+  const diffSec = Math.floor(diffMs / 1000);
+  const diffMin = Math.floor(diffSec / 60);
+  const diffHr = Math.floor(diffMin / 60);
+  const diffDays = Math.floor(diffHr / 24);
+
+  if (diffSec < 60) return 'Just now';
+  if (diffMin < 60) return `${diffMin}m ago`;
+  if (diffHr < 24) return `${diffHr}h ago`;
+  if (diffDays === 1) return 'Yesterday';
+  if (diffDays < 7) return `${diffDays}d ago`;
+  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+function getSubmissionsPerDay(submissions) {
+  const counts = {};
+  const now = new Date();
+  // Initialize last 7 days
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(now);
+    d.setDate(d.getDate() - i);
+    counts[d.toISOString().slice(0, 10)] = 0;
+  }
+  submissions.forEach(s => {
+    const day = new Date(s.submittedAt).toISOString().slice(0, 10);
+    if (day in counts) counts[day]++;
+  });
+  return Object.entries(counts).map(([date, count]) => ({ date, count }));
 }
 
 export default function App() {
@@ -111,6 +145,9 @@ export default function App() {
     ? Math.round(validBudgets.reduce((a, b) => a + b, 0) / validBudgets.length)
     : 0;
 
+  const dailyData = useMemo(() => getSubmissionsPerDay(submissions), [submissions]);
+  const maxDaily = Math.max(...dailyData.map(d => d.count), 1);
+
   const columns = [
     { key: 'fullName', label: 'Name', width: '140px' },
     { key: 'email', label: 'Email', width: '180px' },
@@ -127,9 +164,9 @@ export default function App() {
   const statusColors = {
     sent: '#3b82f6',
     contacted: '#f59e0b',
-    toured: '#8b5cf6',
+    toured: '#f97316',
     placed: '#22c55e',
-    lost: '#6b7280',
+    lost: '#ef4444',
   };
 
   return (
@@ -151,7 +188,7 @@ export default function App() {
             { label: 'Total Leads', value: totalLeads, color: '#3b82f6' },
             { label: 'Sent', value: totalSent, color: '#3b82f6' },
             { label: 'Contacted', value: totalContacted, color: '#f59e0b' },
-            { label: 'Toured', value: totalToured, color: '#8b5cf6' },
+            { label: 'Toured', value: totalToured, color: statusColors.toured },
             { label: 'Placed', value: totalPlaced, color: '#22c55e' },
             { label: 'Avg Budget', value: avgBudget ? `$${avgBudget.toLocaleString()}` : '—', color: '#e2e0dc' },
           ].map(s => (
@@ -160,6 +197,22 @@ export default function App() {
               <div className="stat-label">{s.label}</div>
             </div>
           ))}
+          <div className="stat stat-chart">
+            <div className="sparkline" title="Submissions per day (last 7 days)">
+              {dailyData.map((d, i) => (
+                <div key={d.date} className="spark-bar-wrap" title={`${d.date}: ${d.count}`}>
+                  <div
+                    className="spark-bar"
+                    style={{
+                      height: `${Math.max((d.count / maxDaily) * 100, d.count > 0 ? 8 : 2)}%`,
+                      background: d.count > 0 ? '#3b82f6' : 'rgba(255,255,255,0.06)',
+                    }}
+                  />
+                </div>
+              ))}
+            </div>
+            <div className="stat-label">7-Day Trend</div>
+          </div>
         </div>
 
         <div className="filter-row">
@@ -185,9 +238,31 @@ export default function App() {
               <div className="empty-icon">📋</div>
               <h2>No guest cards yet</h2>
               <p>Open the GuestCard chatbot at <strong>localhost:5175</strong> and complete a search. Submissions will appear here in real-time.</p>
+              <div className="empty-steps">
+                <div className="empty-step">
+                  <div className="step-number">1</div>
+                  <span>Open the GuestCard chatbot</span>
+                </div>
+                <div className="empty-step">
+                  <div className="step-number">2</div>
+                  <span>Fill out the guest card form</span>
+                </div>
+                <div className="empty-step">
+                  <div className="step-number">3</div>
+                  <span>Submissions appear here instantly</span>
+                </div>
+              </div>
+              <div className="empty-pulse-hint">
+                <span className="live-dot" />
+                <span>Listening for new submissions...</span>
+              </div>
             </>
           ) : (
-            <p>No submissions match the "{filterStatus}" filter.</p>
+            <>
+              <div className="empty-icon">🔍</div>
+              <h2>No results</h2>
+              <p>No submissions match the <strong>"{filterStatus}"</strong> filter. Try selecting a different status or "all" to see everything.</p>
+            </>
           )}
         </div>
       ) : (
@@ -233,7 +308,11 @@ export default function App() {
                         aria-label={`Status for ${sub.fullName}`}
                         onChange={e => { e.stopPropagation(); handleStatusChange(sub.id, e.target.value); }}
                         onClick={e => e.stopPropagation()}
-                        style={{ borderColor: statusColors[sub.status], color: statusColors[sub.status] }}
+                        style={{
+                          borderColor: statusColors[sub.status],
+                          color: statusColors[sub.status],
+                          backgroundColor: `${statusColors[sub.status]}15`,
+                        }}
                       >
                         <option value="sent">Sent</option>
                         <option value="contacted">Contacted</option>
@@ -242,7 +321,12 @@ export default function App() {
                         <option value="lost">Lost</option>
                       </select>
                     </td>
-                    <td className="date-cell">{new Date(sub.submittedAt).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</td>
+                    <td
+                      className="date-cell"
+                      title={sub.submittedAt ? new Date(sub.submittedAt).toLocaleString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit', second: '2-digit' }) : ''}
+                    >
+                      {formatRelativeTime(sub.submittedAt)}
+                    </td>
                     <td>
                       <button className="delete-btn" aria-label={`Delete ${sub.fullName}`} onClick={e => { e.stopPropagation(); handleDelete(sub.id); }} title="Delete">✕</button>
                     </td>
