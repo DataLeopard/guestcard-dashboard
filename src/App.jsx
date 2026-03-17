@@ -1,7 +1,13 @@
-import { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 
 function getSubmissions() {
-  return JSON.parse(localStorage.getItem('guestcard_submissions') || '[]');
+  try {
+    return JSON.parse(localStorage.getItem('guestcard_submissions') || '[]');
+  } catch {
+    console.error('Corrupted guestcard_submissions in localStorage, resetting.');
+    localStorage.removeItem('guestcard_submissions');
+    return [];
+  }
 }
 
 export default function App() {
@@ -12,7 +18,17 @@ export default function App() {
   const [expandedId, setExpandedId] = useState(null);
 
   // Poll localStorage every 2 seconds AND listen for storage events
-  const refresh = useCallback(() => setSubmissions(getSubmissions()), []);
+  const refresh = useCallback(() => {
+    const raw = localStorage.getItem('guestcard_submissions') || '[]';
+    setSubmissions(prev => {
+      try {
+        const next = JSON.parse(raw);
+        const statusMap = new Map(prev.map(s => [s.id, s.status]));
+        const merged = next.map(s => ({ ...s, status: statusMap.get(s.id) ?? s.status }));
+        return JSON.stringify(prev) === JSON.stringify(merged) ? prev : merged;
+      } catch { return prev; }
+    });
+  }, []);
 
   useEffect(() => {
     window.addEventListener('storage', refresh);
@@ -66,14 +82,20 @@ export default function App() {
     a.href = url;
     a.download = `guestcards-${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
-    URL.revokeObjectURL(url);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
 
   // Filter and sort
   let filtered = filterStatus === 'all' ? submissions : submissions.filter(s => s.status === filterStatus);
   filtered = [...filtered].sort((a, b) => {
-    const aVal = a[sortField] || '';
-    const bVal = b[sortField] || '';
+    let aVal = a[sortField] ?? '';
+    let bVal = b[sortField] ?? '';
+    if (sortField === 'submittedAt') return sortDir === 'asc' ? new Date(aVal) - new Date(bVal) : new Date(bVal) - new Date(aVal);
+    if (sortField === 'budget' || sortField === 'beds') {
+      const aNum = Number(aVal) || 0;
+      const bNum = Number(bVal) || 0;
+      return sortDir === 'asc' ? aNum - bNum : bNum - aNum;
+    }
     const cmp = String(aVal).localeCompare(String(bVal), undefined, { numeric: true });
     return sortDir === 'asc' ? cmp : -cmp;
   });
@@ -84,8 +106,9 @@ export default function App() {
   const totalContacted = submissions.filter(s => s.status === 'contacted').length;
   const totalToured = submissions.filter(s => s.status === 'toured').length;
   const totalPlaced = submissions.filter(s => s.status === 'placed').length;
-  const avgBudget = submissions.length
-    ? Math.round(submissions.reduce((a, s) => a + Number(s.budget), 0) / submissions.length)
+  const validBudgets = submissions.map(s => Number(s.budget)).filter(n => !isNaN(n) && n > 0);
+  const avgBudget = validBudgets.length
+    ? Math.round(validBudgets.reduce((a, b) => a + b, 0) / validBudgets.length)
     : 0;
 
   const columns = [
@@ -177,6 +200,9 @@ export default function App() {
                     key={col.key}
                     style={{ width: col.width }}
                     onClick={() => handleSort(col.key)}
+                    onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleSort(col.key); } }}
+                    tabIndex={0}
+                    aria-sort={sortField === col.key ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}
                     className={sortField === col.key ? 'sorted' : ''}
                   >
                     {col.label}
@@ -190,20 +216,21 @@ export default function App() {
             </thead>
             <tbody>
               {filtered.map(sub => (
-                <>
-                  <tr key={sub.id} className={expandedId === sub.id ? 'expanded' : ''} onClick={() => setExpandedId(expandedId === sub.id ? null : sub.id)}>
+                <React.Fragment key={sub.id}>
+                  <tr className={expandedId === sub.id ? 'expanded' : ''} aria-expanded={expandedId === sub.id} onClick={() => setExpandedId(expandedId === sub.id ? null : sub.id)}>
                     <td className="name-cell">{sub.fullName}</td>
                     <td>{sub.email}</td>
                     <td>{sub.phone}</td>
                     <td>{sub.moveIn}</td>
                     <td className="center">{sub.beds}</td>
-                    <td>${Number(sub.budget).toLocaleString()}</td>
+                    <td>${(Number(sub.budget) || 0).toLocaleString()}</td>
                     <td>{sub.pets}</td>
                     <td className="sentto-cell">{sub.sentTo}</td>
                     <td>
                       <select
                         className="status-select"
                         value={sub.status}
+                        aria-label={`Status for ${sub.fullName}`}
                         onChange={e => { e.stopPropagation(); handleStatusChange(sub.id, e.target.value); }}
                         onClick={e => e.stopPropagation()}
                         style={{ borderColor: statusColors[sub.status], color: statusColors[sub.status] }}
@@ -217,7 +244,7 @@ export default function App() {
                     </td>
                     <td className="date-cell">{new Date(sub.submittedAt).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</td>
                     <td>
-                      <button className="delete-btn" onClick={e => { e.stopPropagation(); handleDelete(sub.id); }} title="Delete">✕</button>
+                      <button className="delete-btn" aria-label={`Delete ${sub.fullName}`} onClick={e => { e.stopPropagation(); handleDelete(sub.id); }} title="Delete">✕</button>
                     </td>
                   </tr>
                   {expandedId === sub.id && (
@@ -232,7 +259,7 @@ export default function App() {
                       </td>
                     </tr>
                   )}
-                </>
+                </React.Fragment>
               ))}
             </tbody>
           </table>

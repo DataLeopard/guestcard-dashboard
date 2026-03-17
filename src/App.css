@@ -152,6 +152,15 @@ body {
   border: 1px solid rgba(255,255,255,0.06);
   border-radius: 8px;
   background: rgba(17,19,24,0.6);
+  background-image:
+    linear-gradient(to right, rgba(17,19,24,0.6) 30%, transparent),
+    linear-gradient(to left, rgba(17,19,24,0.6) 30%, transparent),
+    linear-gradient(to right, rgba(0,0,0,0.4), transparent),
+    linear-gradient(to left, rgba(0,0,0,0.4), transparent);
+  background-position: left center, right center, left center, right center;
+  background-repeat: no-repeat;
+  background-size: 20px 100%, 20px 100%, 10px 100%, 10px 100%;
+  background-attachment: local, local, scroll, scroll;
 }
 
 table {
