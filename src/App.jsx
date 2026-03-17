@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 
+const API_URL = 'http://localhost:3001/api/submissions';
+
 function getSubmissions() {
   try {
     return JSON.parse(localStorage.getItem('guestcard_submissions') || '[]');
@@ -8,6 +10,14 @@ function getSubmissions() {
     localStorage.removeItem('guestcard_submissions');
     return [];
   }
+}
+
+async function fetchSubmissions() {
+  try {
+    const res = await fetch(API_URL);
+    if (res.ok) return await res.json();
+  } catch { /* API not available, fall through */ }
+  return null;
 }
 
 function formatRelativeTime(isoString) {
@@ -51,17 +61,27 @@ export default function App() {
   const [filterStatus, setFilterStatus] = useState('all');
   const [expandedId, setExpandedId] = useState(null);
 
-  // Poll localStorage every 2 seconds AND listen for storage events
-  const refresh = useCallback(() => {
-    const raw = localStorage.getItem('guestcard_submissions') || '[]';
-    setSubmissions(prev => {
-      try {
-        const next = JSON.parse(raw);
+  // Poll shared API every 2 seconds (falls back to localStorage)
+  const refresh = useCallback(async () => {
+    const apiData = await fetchSubmissions();
+    if (apiData) {
+      setSubmissions(prev => {
         const statusMap = new Map(prev.map(s => [s.id, s.status]));
-        const merged = next.map(s => ({ ...s, status: statusMap.get(s.id) ?? s.status }));
+        const merged = apiData.map(s => ({ ...s, status: statusMap.get(s.id) ?? s.status }));
         return JSON.stringify(prev) === JSON.stringify(merged) ? prev : merged;
-      } catch { return prev; }
-    });
+      });
+    } else {
+      // Fallback to localStorage if API is not running
+      const raw = localStorage.getItem('guestcard_submissions') || '[]';
+      setSubmissions(prev => {
+        try {
+          const next = JSON.parse(raw);
+          const statusMap = new Map(prev.map(s => [s.id, s.status]));
+          const merged = next.map(s => ({ ...s, status: statusMap.get(s.id) ?? s.status }));
+          return JSON.stringify(prev) === JSON.stringify(merged) ? prev : merged;
+        } catch { return prev; }
+      });
+    }
   }, []);
 
   useEffect(() => {
@@ -85,19 +105,22 @@ export default function App() {
   const handleStatusChange = (id, newStatus) => {
     const updated = submissions.map(s => s.id === id ? { ...s, status: newStatus } : s);
     setSubmissions(updated);
-    localStorage.setItem('guestcard_submissions', JSON.stringify(updated));
+    fetch(`${API_URL}/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: newStatus }) })
+      .catch(() => localStorage.setItem('guestcard_submissions', JSON.stringify(updated)));
   };
 
   const handleDelete = (id) => {
     const updated = submissions.filter(s => s.id !== id);
     setSubmissions(updated);
-    localStorage.setItem('guestcard_submissions', JSON.stringify(updated));
+    fetch(`${API_URL}/${id}`, { method: 'DELETE' })
+      .catch(() => localStorage.setItem('guestcard_submissions', JSON.stringify(updated)));
   };
 
   const handleClearAll = () => {
     if (confirm('Clear all guest card submissions? This cannot be undone.')) {
       setSubmissions([]);
-      localStorage.setItem('guestcard_submissions', '[]');
+      fetch(API_URL, { method: 'DELETE' })
+        .catch(() => localStorage.setItem('guestcard_submissions', '[]'));
     }
   };
 
